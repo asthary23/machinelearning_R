@@ -1,0 +1,202 @@
+---
+title: "K-means algorithm on customer churn data"
+format: html
+---
+
+Own Work:
+```{r}
+set.seed(1234)
+library(tidyverse)
+library(modeldata)
+library(ggplot2)
+df <- mlc_churn
+
+#Stripping all categorical variables from the dataset
+data <- mlc_churn %>%
+  select(-c(state, area_code, international_plan, voice_mail_plan, churn))
+
+data <- scale(data)
+```
+
+```{r}
+wss_set <- list()
+k_range <- c(1:10)
+for(i in k_range){
+  wss_set[[i]] <- kmeans(data, centers = i, nstart = 20)$tot.withinss
+}
+
+wss <- c(unlist(wss_set))
+wss_method <- data.frame(k_range, wss)
+```
+
+```{r}
+#Elbow plot method
+elbow_plot <- wss_method %>%
+  ggplot(aes(x = factor(k_range, levels = c(1:10)), y = wss)) + 
+  geom_point() + 
+  geom_line(aes(group = 1)) +
+  labs(x = "Number of Clusters (k)",
+       y = "Total Within Sum of Squares") +
+  annotate("segment", x = 7, xend = 7, y = 48000, yend = wss[7], linetype = "dashed") +
+  theme_classic()
+elbow_plot
+```
+
+```{r}
+library(cluster)
+library(dplyr)
+
+ss <- list()
+for(i in k_range){
+  kms <- kmeans(data, centers = i, nstart = 20)$cluster
+  ss[[i]] <- silhouette(kms, dist(data))
+}
+
+#https://stackoverflow.com/questions/67741461/how-to-convert-matrix-output-from-silhouette-to-dataframe-in-r
+ss_cleaned <- Filter(Negate(is.null), ss)
+ss_df <- as.data.frame(ss_cleaned)
+
+ytwo <- mean(ss_df$sil_width)
+ythree <- mean(ss_df$sil_width.1)
+yfour <- mean(ss_df$sil_width.2)
+yfive <- mean(ss_df$sil_width.3)
+ysix <- mean(ss_df$sil_width.4)
+yseven <- mean(ss_df$sil_width.5)
+yeight <- mean(ss_df$sil_width.6)
+ynine <- mean(ss_df$sil_width.7)
+yten <- mean(ss_df$sil_width.8)
+
+#0 represents the undefined value for average silhouette width for one cluster (k = 1)
+y_values <- c(0, rbind(ytwo, ythree, yfour, yfive, ysix, yseven, yeight, ynine, yten))
+
+ss_method <- data.frame(k_range, y_values)
+```
+
+```{r}
+ss_plot <- ss_method %>%
+  ggplot(aes(x = factor(k_range, levels = c(1:10)), y = y_values)) + 
+  geom_point() + 
+  geom_line(aes(group = 1)) +
+  labs(x = "Number of Clusters (k)",
+       y = "Average Silhouette Width") +
+  annotate("segment", x = 2, xend = 2, y = 0, yend = ytwo, linetype = "dashed") +
+  theme_classic()
+ss_plot
+
+```
+
+```{r}
+#May take ~8+ minutes to render the document if this code part is run; less if "factoextra" is pre-installed
+install.packages("factoextra")
+library(factoextra)
+gap_stat <- clusGap(data, FUN = kmeans, nstart = 20,
+                    K.max = 10, B = 50)
+# Print the result
+print(gap_stat, method = "firstmax")
+
+#Function within "factoextra" that produces gap statistic plot, given the large memory usage of clusGap()
+fviz_nbclust(data, kmeans, method = "gap_stat") #Maximize this stat
+
+```
+
+Optimal number of clusters per method: 
+Elbow plot - appears to be 7 clusters (k = 7)
+Silhouette plot - appears to be 2 clusters (k = 2)
+Gap statistic plot - appears to be 1 cluster (k = 1)
+-# of clusters chosen for this analysis will be: 2
+
+```{r}
+#Not PCA eligible, since correlation value is not stronger than 0.3 in either direction
+average_cor <- cor(data)
+
+#Visualizing clusters using original variables
+kmeans_object <- kmeans(data, centers = 2, nstart = 20)
+
+data <- mlc_churn %>%
+  select(-c(state, area_code, international_plan, voice_mail_plan, churn)) %>%
+  mutate(cluster = kmeans_object$cluster)
+
+new_data <- data %>%
+  filter(number_vmail_messages > 0, total_day_calls > 0)
+
+#Plots are better run when rendered 
+assoc_1 <- new_data %>%
+  ggplot(aes(x = total_day_minutes, y = total_eve_minutes, color = as.factor(cluster))) + 
+  geom_point(size = 0.5) + 
+  scale_color_manual(name = "Cluster", 
+                    values = c("dodgerblue3", "orange")) + 
+  labs(x = "Total Minutes on Call (Day)",
+       y = "Total Minutes on Call (Evening)",
+       title = "Clear Distinction in Cluster Assignments") +
+  theme_classic()
+
+assoc_2 <- new_data %>%
+  ggplot(aes(x = total_day_minutes, y = total_night_minutes, color = as.factor(cluster))) +
+  geom_jitter(size = 0.5) +
+  scale_color_manual(name = "Cluster", 
+                    values = c("dodgerblue3", "orange")) + 
+  labs(x = "Total Minutes on Call (Day)",
+       y = "Total Minutes on Call (Night)",
+       title = "Clear Distinction in Cluster Assignments") +
+  theme_classic()
+
+assoc_3 <- new_data %>%
+  ggplot(aes(x = total_day_minutes, y = total_intl_minutes, color = as.factor(cluster))) +
+  geom_jitter(size = 0.5) +
+  scale_color_manual(name = "Cluster", 
+                    values = c("dodgerblue3", "orange")) + 
+  labs(x = "Total Minutes on Call (Day)",
+       y = "Total Minutes on Call (International)",
+       title = "Clear Distinction in Cluster Assignments") +
+  theme_classic()
+
+no_assoc_1 <- new_data %>%
+  ggplot(aes(x = total_eve_minutes, y = total_night_minutes, color = as.factor(cluster))) +
+  geom_jitter(size = 0.5) +
+  scale_color_manual(name = "Cluster", 
+                    values = c("dodgerblue3", "orange")) + 
+  labs(x = "Total Minutes on Call (Evening)",
+       y = "Total Minutes on Call (Night)",
+       title = "No Clear Distinction in Cluster Assignments") + 
+  theme_classic()
+
+no_assoc_2 <- new_data %>%
+  ggplot(aes(x = total_night_minutes, y = total_intl_minutes, color = as.factor(cluster))) +
+  geom_jitter(size = 0.5) +
+  scale_color_manual(name = "Cluster", 
+                    values = c("dodgerblue3", "orange")) + 
+  labs(x = "Total Minutes on Call (Night)",
+       y = "Total Minutes on Call (International)",
+       title = "No Clear Distinction in Cluster Assignments") + 
+  theme_classic()
+
+no_assoc_3 <- new_data %>%
+  ggplot(aes(x = total_eve_minutes, y = total_intl_minutes, color = as.factor(cluster))) +
+  geom_jitter(size = 0.5) +
+  scale_color_manual(name = "Cluster", 
+                    values = c("dodgerblue3", "orange")) + 
+  labs(x = "Total Minutes on Call (Evening)",
+       y = "Total Minutes on Call (International)",
+       title = "No Clear Distinction in Cluster Assignments") + 
+  theme_classic()
+
+library(gridExtra)
+grid.arrange(assoc_1, assoc_2, assoc_3, nrow = 3)
+grid.arrange(no_assoc_1, no_assoc_2, no_assoc_3, nrow = 3)
+
+#If the grid.arrange() plotting format is causing y-axis titles to overlap, you can run each plot separately
+#Like so: assoc_1, assoc_2, assoc_3, no_assoc_1, no_assoc_2, no_assoc_3
+
+```
+
+You can interpret the plot by examining whether there are distinct groups or patterns in the data based on these two variables. The separation of points into different clusters suggests that there is some structure or similarity in the data based on the features used for clustering. It appears that the total minutes spent on calls during the day has a strong pattern associated with any other _minutes variable. 
+
+```{r}
+churn_data <- data %>%
+  mutate(churn = mlc_churn$churn, 
+         churn_logic = churn == "yes")
+
+churn_data %>%
+  group_by(cluster) %>%
+  summarize(prop = mean(churn_logic))
+```
